@@ -1,0 +1,36 @@
+#!/bin/bash
+UFRGS=".ufrgs.br"
+SSHC="/usr/bin/ssh leonardo@"
+CMD="/usr/bin/gnome-terminal --maximize --window-with-profile=Bitzki"
+CHASQUEMAIL1="${SSHC}chasquemail1${UFRGS}"
+LOGHOST="${SSHC}loghostf.cpd${UFRGS}"
+MSA1="${SSHC}msa1${UFRGS}"
+MSA2="${SSHC}msa2${UFRGS}"
+DELIVERY1="${SSHC}delivery1${UFRGS}"
+DELIVERY2="${SSHC}delivery2${UFRGS}"
+DELIVERY3="${SSHC}delivery3${UFRGS}"
+RELAY1="${SSHC}relay1${UFRGS}"
+RELAY2="${SSHC}relay2${UFRGS}"
+RELAY3="${SSHC}relay3${UFRGS}"
+CURLEY="${SSHC}curley${UFRGS}"
+CURLY="${SSHC}curly${UFRGS}"
+CURLYJOE="${SSHC}curlyjoe${UFRGS}"
+HARRY="${SSHC}harry${UFRGS}"
+JOE="${SSHC}joe${UFRGS}"
+MOE="${SSHC}moe${UFRGS}"
+LARRY="${SSHC}larry${UFRGS}"
+SHEMP="${SSHC}shemp${UFRGS}"
+WEBMAIL1="${SSHC}webmail1${UFRGS}"
+WEBMAIL2="${SSHC}webmail2${UFRGS}"
+WEBMAIL3="${SSHC}webmail3${UFRGS}"
+WEBMAILHORDE="${SSHC}webmail-horde${UFRGS}"
+
+for cmd in CHASQUEMAIL1 LOGHOST MSA1 MSA2 DELIVERY1 DELIVERY2 DELIVERY3 RELAY1 RELAY2 RELAY3 CURLEY CURLY CURLYJOE HARRY JOE MOE LARRY SHEMP WEBMAIL1 WEBMAIL2 WEBMAIL3 WEBMAILHORDE
+    do  
+        eval cmd_str='$'$cmd;
+        CMD="$CMD --tab $cmd -e \"$cmd_str\""
+    done                                                                                                                                                      
+
+eval $CMD
+
+exit
