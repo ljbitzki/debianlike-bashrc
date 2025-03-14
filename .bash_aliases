@@ -94,7 +94,7 @@ function d() {
             else
                 while read -r IMG VER IMAGE; do
                     docker image rm "${IMAGE}" > /dev/null 2>&1
-                    echo -e "Removendo container ${IMG}\t${VER}\t${IMAGE}"
+                    echo -e "Removendo imagem ${IMG}\t${VER}\t${IMAGE}"
                 done < <( docker image ls | grep "${2}" | awk '{print $1" "$2" "$3}' | grep -Ew '([a-f0-9]){12}$' )
             fi
         ;;
