@@ -124,7 +124,7 @@ function prompt {
   local CYANBOLD="\[\033[1;36m\]"
   local WHITE="\[\033[0;37m\]"
   local WHITEBOLD="\[\033[1;37m\]"
-export PS1="$BLACKBOLD[\t]$YELLOWBOLD \u$WHITEBOLD@$GREENBOLD\h$WHITEBOLD:$BLUEBOLD\w\[\033[00m\] \\$ "
+export PS1="$BLACKBOLD[\t]$CYANBOLD \u$REDBOLD@$GREENBOLD\h$WHITEBOLD:$BLUEBOLD\w\[\033[00m\] \\$ "
 }
 prompt
 
