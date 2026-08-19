@@ -1,8 +1,8 @@
-#!/bin/bash
+#!/usr/bin/env bash
 if [ "${#}" -ne "3" ]; then
   echo -e "Necessário três parâmetros: \e[33m$0\e[0m \e[35maaa.bbb.ccc.ddd/ee\e[0m \e[35myyy\e[0m \e[35mzz\e[0m"
   echo -e "1: Endereço de rede com máscara para efetuar o ping em todos os dispositivos dessa rede."
-  echo -e "2: Timeout em milissegundos. Sugerido entre \e[35m5\e[0m e \e[35m200\e[0m, dependendo do cenário."
+  echo -e "2: Timeout em milissegundos. Sugerido entre \e[35m50\e[0m e \e[35m200\e[0m, dependendo do cenário."
   echo -e "3: Quantos endereços por linha para exibição. Sugerido \e[35m12\e[0m ou \e[35m16\e[0m, dependendo da resolução do terminal."
   exit 1
 fi
