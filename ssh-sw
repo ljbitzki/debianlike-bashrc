@@ -1,0 +1,207 @@
+#!/usr/bin/env bash
+# ssh-sw: SSH adaptativo para switches e outros equipamentos com SSH legado.
+set -u
+
+USAGE() {
+  cat <<'HELP'
+Uso: ssh-sw [--allow-weak] usuario@host [opcoes_do_ssh]
+
+Exemplos:
+  ssh-sw admin@10.179.0.117
+  ssh-sw admin@10.181.0.136 -p 2222
+  ssh-sw --allow-weak admin@10.179.0.117
+  ssh-sw admin@10.179.0.117 -i ~/.ssh/id_ed25519
+
+A sondagem detecta incompatibilidades KEX/HostKey/Ciphers/MACs e executa uma conexão SSH interativa com os ajustes necessários. A validação normal da chave do servidor e mantida na conexão final.
+--allow-weak permite, além de ssh-rsa e group14-sha1, algoritmos ainda mais fracos, como group1, DSA, cifras CBC e MACs MD5, quando suportados localmente.
+HELP
+}
+
+ALLOW_WEAK=0
+while (( ${#} > 0 )); do
+  case "${1}" in
+    --allow-weak) ALLOW_WEAK=1; shift ;;
+    --help|-h) USAGE; exit 0 ;;
+    --) shift; break ;;
+    *) break ;;
+  esac
+done
+
+if (( ${#} < 1 )) || [[ ${1} == -* ]]; then
+  USAGE >&2
+  exit 2
+fi
+
+TARGET=${1}
+shift
+SSH_ARGS=("${@}")
+
+if ! command -v ssh >/dev/null 2>&1; then
+  echo '[ssh-sw] Erro: o executável ssh não foi encontrado.' >&2
+  exit 127
+fi
+
+if ! command -v timeout >/dev/null 2>&1; then
+  echo '[ssh-sw] Erro: o utilitário timeout (coreutils) não foi encontrado.' >&2
+  echo '[ssh-sw] Sugestão: apt install coreutils.' >&2
+  exit 127
+fi
+
+PROBE_OPTS=(
+  -n -T -N
+  -o LogLevel=DEBUG1
+  -o BatchMode=yes
+  -o PreferredAuthentications=none
+  -o PubkeyAuthentication=no
+  -o PasswordAuthentication=no
+  -o KbdInteractiveAuthentication=no
+  -o HostbasedAuthentication=no
+  -o GSSAPIAuthentication=no
+  -o NumberOfPasswordPrompts=0
+  -o StrictHostKeyChecking=yes
+  -o ControlMaster=no
+  -o ControlPath=none
+  -o ClearAllForwardings=yes
+  -o ConnectionAttempts=1
+  -o ConnectTimeout=8
+)
+
+KEX_CANDIDATES=(
+  mlkem768x25519-sha256 curve25519-sha256 curve25519-sha256@libssh.org
+  ecdh-sha2-nistp256 diffie-hellman-group16-sha512
+  diffie-hellman-group14-sha256 diffie-hellman-group-exchange-sha256
+  diffie-hellman-group14-sha1
+  diffie-hellman-group-exchange-sha1 diffie-hellman-group1-sha1
+)
+HOSTKEYS_CANDIDATES=(
+  ssh-ed25519 ecdsa-sha2-nistp256 rsa-sha2-512 rsa-sha2-256
+  ssh-rsa ssh-dss
+)
+CIPHERS_CANDIDATES=(
+  chacha20-poly1305@openssh.com aes256-gcm@openssh.com
+  aes128-gcm@openssh.com aes256-ctr aes192-ctr aes128-ctr
+  aes256-cbc aes192-cbc aes128-cbc 3des-cbc
+  blowfish-cbc cast128-cbc arcfour256 arcfour128 arcfour
+)
+MAC_CANDIDATES=(
+  hmac-sha2-512-etm@openssh.com hmac-sha2-256-etm@openssh.com
+  hmac-sha2-512 hmac-sha2-256 hmac-sha1-etm@openssh.com
+  hmac-sha1 hmac-md5-etm@openssh.com hmac-md5
+  hmac-sha1-96 hmac-md5-96
+)
+
+IS_VERY_WEAK() {
+  case "${1}" in
+    diffie-hellman-group1-sha1|diffie-hellman-group-exchange-sha1|ssh-dss|\
+    *-cbc|arcfour*|hmac-md5*|hmac-sha1-96) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
+CHOSEN=''
+WEAK_ONLY=0
+CHOOSE_ALGO() {
+  local KIND=${1} OFFER=${2} QUERY='' CANDIDATE SUPPORTED=''
+  local -a CANDIDATES=()
+  CHOSEN=''
+  WEAK_ONLY=0
+  case "$KIND" in
+    KexAlgorithms)       QUERY=kex;    CANDIDATES=("${KEX_CANDIDATES[@]}") ;;
+    HostKeyAlgorithms)   QUERY=key;    CANDIDATES=("${HOSTKEYS_CANDIDATES[@]}") ;;
+    Ciphers)             QUERY=cipher; CANDIDATES=("${CIPHERS_CANDIDATES[@]}") ;;
+    MACs)                QUERY=mac;    CANDIDATES=("${MAC_CANDIDATES[@]}") ;;
+    *) return 1 ;;
+  esac
+
+  SUPPORTED=$(ssh -Q "$QUERY" 2>/dev/null) || return 1
+  for CANDIDATE in "${CANDIDATES[@]}"; do
+    [[ ",$OFFER," == *",$CANDIDATE,"* ]] || continue
+    grep -Fxq -- "$CANDIDATE" <<< "$SUPPORTED" || continue
+    if (( !ALLOW_WEAK )) && IS_VERY_WEAK "$CANDIDATE"; then
+      WEAK_ONLY=1
+      continue
+    fi
+    CHOSEN=$CANDIDATE
+    return 0
+  done
+  return 1
+}
+
+COMPAT_OPTS=()
+declare -A ALREADY_ADDED=()
+READY=0
+
+for ((ATTEMPT=1; ATTEMPT<=8; ATTEMPT++)); do
+  RESULT=$(LC_ALL=C timeout --signal=TERM 15s \
+    ssh "${PROBE_OPTS[@]}" "${SSH_ARGS[@]}" "${COMPAT_OPTS[@]}" "${TARGET}" 2>&1)
+  RC=${?}
+  REGEX='no matching (key exchange method|host key type|cipher|MAC) found\.[[:space:]]*Their offer:[[:space:]]*([^[:space:]]+)'
+  if [[ $RESULT =~ $REGEX ]]; then
+    CATEGORY=${BASH_REMATCH[1]}
+    OFFER=${BASH_REMATCH[2]}
+    case "$CATEGORY" in
+      'key exchange method') OPTION=KexAlgorithms ;;
+      'host key type')      OPTION=HostKeyAlgorithms ;;
+      'cipher')             OPTION=Ciphers ;;
+      'MAC')                OPTION=MACs ;;
+      *) echo "[ssh-sw] Categoria inesperada: $CATEGORY" >&2; exit 1 ;;
+    esac
+
+    if [[ -n ${ALREADY_ADDED[$OPTION]:-} ]]; then
+      echo "[ssh-sw] O ajuste em $OPTION nÃo resolveu a negociação." >&2
+      printf '%s\n' "$RESULT" | tail -n 15 >&2
+      exit 1
+    fi
+
+    if ! CHOOSE_ALGO "$OPTION" "$OFFER"; then
+      echo "[ssh-sw] Não existe algoritmo permitido/compatível para $OPTION." >&2
+      echo "[ssh-sw] Ofertas do equipamento: $OFFER" >&2
+      if (( WEAK_ONLY && !ALLOW_WEAK )); then
+        echo '[ssh-sw] Tente --allow-weak se a conexão for realmente necessária.' >&2
+      else
+        echo '[ssh-sw] Consulte os algoritmos locais com: ssh -Q kex|key|cipher|mac' >&2
+      fi
+      exit 1
+    fi
+
+    ALREADY_ADDED[$OPTION]=$CHOSEN
+    COMPAT_OPTS+=("-o${OPTION}=+${CHOSEN}")
+    echo "[ssh-sw] $OPTION: habilitando $CHOSEN" >&2
+    continue
+  fi
+
+  if [[ $RESULT == *'REMOTE HOST IDENTIFICATION HAS CHANGED'* ]] ||
+     [[ $RESULT == *'POSSIBLE DNS SPOOFING DETECTED'* ]]; then
+    printf '[ssh-sw] Alerta de identidade do host:\n%s\n' "$RESULT" >&2
+    exit 255
+  fi
+
+  if (( RC == 0 )) || [[ $RESULT == *'SSH2_MSG_NEWKEYS received'* ]] ||
+     [[ $RESULT == *'SSH2_MSG_SERVICE_ACCEPT received'* ]] ||
+     [[ $RESULT == *'Permission denied'* ]] ||
+     [[ $RESULT == *'Host key verification failed'* ]]; then
+    READY=1
+    break
+  fi
+
+  printf '[ssh-sw] Falha na sondagem de %s (código %d).\n' "$TARGET" "$RC" >&2
+  if [[ -n $RESULT ]]; then
+    printf '%s\n' "$RESULT" | tail -n 30 >&2
+  else
+    echo '[ssh-sw] O cliente SSH não produziu diagnóstico; tente: ssh -vv usuario@host' >&2
+  fi
+  exit "$RC"
+done
+
+if (( !READY )); then
+  echo '[ssh-sw] Limite de tentativas de negociação atingido.' >&2
+  exit 1
+fi
+
+if (( ${#COMPAT_OPTS[@]} > 0 )); then
+  printf '[ssh-sw] Parâmetros de compatibilidade:' >&2
+  printf ' %q' "${COMPAT_OPTS[@]}" >&2
+  printf '\n' >&2
+fi
+
+exec ssh "${SSH_ARGS[@]}" "${COMPAT_OPTS[@]}" "$TARGET"
